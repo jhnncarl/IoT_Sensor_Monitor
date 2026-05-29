@@ -10,11 +10,11 @@ class SupabaseService {
   final http.Client _client;
 
   // Set this to false when you are ready to connect to the real Supabase API.
-  static const bool useDemoData = true;
+  static const bool useDemoData = false;
 
   // Replace these placeholders with your real Supabase project values later.
-  static const String supabaseUrl = 'https://your-project-id.supabase.co';
-  static const String supabaseApiKey = 'YOUR_SUPABASE_ANON_API_KEY';
+  static const String supabaseUrl = 'https://xfumytkobyygaongyaax.supabase.co';
+  static const String supabaseApiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmdW15dGtvYnl5Z2Fvbmd5YWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNDM4MzEsImV4cCI6MjA5NTYxOTgzMX0.Vumdgb2L7GiUbTG7RRKP2ua0ngyBukpfllnLe1gy3lU';
   static const String tableName = 'sensor_readings';
 
   Future<SensorReading> fetchLatestReading() async {
