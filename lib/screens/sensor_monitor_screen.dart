@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -15,28 +17,48 @@ class SensorMonitorScreen extends StatefulWidget {
 class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final DateFormat _dateFormat = DateFormat('MMM d, yyyy - h:mm a');
+  static const Duration _autoRefreshInterval = Duration(seconds: 2);
 
   SensorReading? _latestReading;
+  Timer? _autoRefreshTimer;
   String? _errorMessage;
   bool _isLoading = true;
+  bool _isFetching = false;
 
   @override
   void initState() {
     super.initState();
     _fetchLatestReading();
+    _startAutoRefresh();
   }
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     _supabaseService.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchLatestReading() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  void _startAutoRefresh() {
+    _autoRefreshTimer = Timer.periodic(
+      _autoRefreshInterval,
+      (_) => _fetchLatestReading(showLoading: false),
+    );
+  }
+
+  Future<void> _fetchLatestReading({bool showLoading = true}) async {
+    if (!mounted || _isFetching) {
+      return;
+    }
+
+    _isFetching = true;
+
+    if (showLoading || _latestReading == null) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final reading = await _supabaseService.fetchLatestReading();
@@ -46,6 +68,7 @@ class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
 
       setState(() {
         _latestReading = reading;
+        _errorMessage = null;
       });
     } catch (_) {
       if (!mounted) {
@@ -57,6 +80,8 @@ class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
             'Unable to load sensor data. Check your Supabase URL, API key, table name, and network connection.';
       });
     } finally {
+      _isFetching = false;
+
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -71,7 +96,7 @@ class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
       appBar: AppBar(title: const Text('IoT Sensor Monitor')),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _fetchLatestReading,
+          onRefresh: () => _fetchLatestReading(),
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 700;
@@ -101,7 +126,7 @@ class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
     if (_errorMessage != null && _latestReading == null) {
       return _ErrorState(
         message: _errorMessage!,
-        onRetry: _fetchLatestReading,
+        onRetry: () => _fetchLatestReading(),
         isLoading: _isLoading,
       );
     }
@@ -110,7 +135,7 @@ class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
     if (reading == null) {
       return _ErrorState(
         message: 'No sensor readings are available yet.',
-        onRetry: _fetchLatestReading,
+        onRetry: () => _fetchLatestReading(),
         isLoading: _isLoading,
       );
     }
@@ -146,7 +171,7 @@ class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
         _StatusHeader(
           timestamp: _dateFormat.format(reading.timestamp),
           isLoading: _isLoading,
-          onRefresh: _fetchLatestReading,
+          onRefresh: () => _fetchLatestReading(),
         ),
         const SizedBox(height: 20),
         if (_errorMessage != null) ...[
@@ -177,8 +202,8 @@ class _SensorMonitorScreenState extends State<SensorMonitorScreen> {
               ? 'Demo sensor feed'
               : 'Supabase REST API',
           status: SupabaseService.useDemoData
-              ? 'Offline preview'
-              : 'Connected backend',
+              ? 'Offline preview, refreshing every 2 sec'
+              : 'Connected backend, refreshing every 2 sec',
         ),
       ],
     );
