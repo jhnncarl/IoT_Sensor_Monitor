@@ -39,11 +39,15 @@ void setupWiFi() {
   WiFi.mode(WIFI_STA);
 
   WiFiManager wifiManager;
+  wifiManager.setDebugOutput(true);
   wifiManager.setAPCallback(notifySetupPortalStarted);
   wifiManager.setSaveConfigCallback(notifyWiFiSaved);
   wifiManager.setConfigPortalTimeout(180);
+  wifiManager.setConnectTimeout(20);
+  wifiManager.setConnectRetries(3);
 
   Serial.println("Connecting to saved WiFi...");
+  Serial.println("If no saved WiFi works, setup portal will open.");
   if (!wifiManager.autoConnect(setupPortalName)) {
     Serial.println("WiFi setup timed out. Restarting ESP32...");
     delay(2000);
@@ -119,6 +123,12 @@ bool sendReading(float temperature, float humidity) {
 
 void setup() {
   Serial.begin(115200);
+  delay(1200);
+  Serial.println();
+  Serial.println("ESP32 sensor monitor starting...");
+  Serial.println("Serial ready at 115200 baud.");
+  Serial.println("Normal WiFi IP appears only after connecting to router WiFi.");
+
   dht.begin();
   setupWiFi();
 }
