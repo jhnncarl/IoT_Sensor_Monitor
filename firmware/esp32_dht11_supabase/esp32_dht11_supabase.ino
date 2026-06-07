@@ -3,7 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFiManager.h>
 
-// ✅ Required DHT libraries
+// DHT libraries
 #include "DHT.h"
 #include "Adafruit_Sensor.h"
 
@@ -14,34 +14,68 @@ DHT dht(DHTPIN, DHTTYPE);
 
 // Supabase config
 const char* supabaseInsertUrl =
-    "https://xfumytkobyygaongyaax.supabase.co/rest/v1/sensor_readings";
+  "https://xfumytkobyygaongyaax.supabase.co/rest/v1/sensor_readings";
 
 const char* supabaseApiKey =
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmdW15dGtvYnl5Z2Fvbmd5YWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNDM4MzEsImV4cCI6MjA5NTYxOTgzMX0.Vumdgb2L7GiUbTG7RRKP2ua0ngyBukpfllnLe1gy3lU";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmdW15dGtvYnl5Z2Fvbmd5YWF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNDM4MzEsImV4cCI6MjA5NTYxOTgzMX0.Vumdgb2L7GiUbTG7RRKP2ua0ngyBukpfllnLe1gy3lU";
 
 const char* setupPortalName = "ESP32-Sensor-Setup";
-const unsigned long sendIntervalMs = 2000;
+
+const unsigned long sendIntervalMs = 10000; // safer than 2s
 
 unsigned long lastSendAt = 0;
-bool wasWiFiConnected = false;
+unsigned long lastReconnectAttempt = 0;
+unsigned long wifiLostTime = 0;
 
-// WiFi setup portal callback
+// ---------------- WIFI EVENTS ----------------
+void WiFiEvent(WiFiEvent_t event) {
+  switch (event) {
+
+    case ARDUINO_EVENT_WIFI_STA_START:
+      Serial.println("WiFi started");
+      break;
+
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+      Serial.println("Connected to WiFi AP");
+      break;
+
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      Serial.print("IP Address: ");
+      Serial.println(WiFi.localIP());
+      wifiLostTime = 0;
+      break;
+
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      Serial.println("WiFi disconnected");
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ---------------- WIFI PORTAL CALLBACKS ----------------
 void notifySetupPortalStarted(WiFiManager* manager) {
   (void)manager;
   Serial.println();
   Serial.println("WiFi setup portal started.");
   Serial.print("Connect to: ");
   Serial.println(setupPortalName);
-  Serial.print("Then open: http://");
-  Serial.println(WiFi.softAPIP());
+  Serial.println("Open: http://192.168.4.1");
 }
 
 void notifyWiFiSaved() {
-  Serial.println("WiFi credentials saved. Connecting...");
+  Serial.println("WiFi credentials saved.");
 }
 
+// ---------------- WIFI SETUP ----------------
 void setupWiFi() {
   WiFi.mode(WIFI_STA);
+
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
+
+  WiFi.onEvent(WiFiEvent);
 
   WiFiManager wifiManager;
   wifiManager.setDebugOutput(true);
@@ -52,39 +86,50 @@ void setupWiFi() {
   wifiManager.setConnectRetries(3);
 
   Serial.println("Connecting to saved WiFi...");
-  Serial.println("If no saved WiFi works, setup portal will open.");
+
   if (!wifiManager.autoConnect(setupPortalName)) {
-    Serial.println("WiFi setup timed out. Restarting ESP32...");
+    Serial.println("WiFi setup failed. Restarting...");
     delay(2000);
     ESP.restart();
   }
-
-  wasWiFiConnected = true;
 
   Serial.println("WiFi connected.");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 }
 
+// ---------------- WIFI SAFE RECONNECT ----------------
 bool ensureWiFiConnected() {
   if (WiFi.status() == WL_CONNECTED) {
-    if (!wasWiFiConnected) {
-      wasWiFiConnected = true;
-      Serial.println("WiFi reconnected.");
-    }
+    wifiLostTime = 0;
     return true;
   }
 
-  if (wasWiFiConnected) {
-    wasWiFiConnected = false;
-    Serial.println("WiFi disconnected. Reconnecting...");
+  if (wifiLostTime == 0) {
+    wifiLostTime = millis();
+    Serial.println("WiFi lost. Starting recovery timer...");
   }
 
-  WiFi.reconnect();
-  delay(500);
-  return WiFi.status() == WL_CONNECTED;
+  // restart if WiFi lost too long
+  if (millis() - wifiLostTime > 60000) {
+    Serial.println("WiFi lost for 60s. Restarting ESP32...");
+    ESP.restart();
+  }
+
+  // reconnect every 10 seconds only
+  if (millis() - lastReconnectAttempt > 10000) {
+    lastReconnectAttempt = millis();
+
+    Serial.println("Attempting safe WiFi reconnect...");
+    WiFi.disconnect(false);
+    delay(200);
+    WiFi.reconnect();
+  }
+
+  return false;
 }
 
+// ---------------- SUPABASE SEND ----------------
 bool sendReading(float temperature, float humidity) {
   WiFiClientSecure client;
   client.setInsecure();
@@ -121,7 +166,7 @@ bool sendReading(float temperature, float humidity) {
     return true;
   }
 
-  Serial.print("Failed. HTTP ");
+  Serial.print("Failed HTTP ");
   Serial.print(responseCode);
   Serial.print(": ");
   Serial.println(responseBody);
@@ -129,21 +174,21 @@ bool sendReading(float temperature, float humidity) {
   return false;
 }
 
+// ---------------- SETUP ----------------
 void setup() {
   Serial.begin(115200);
   delay(1200);
-  Serial.println();
-  Serial.println("ESP32 sensor monitor starting...");
-  Serial.println("Serial ready at 115200 baud.");
-  Serial.println("Normal WiFi IP appears only after connecting to router WiFi.");
 
-  // Initialize DHT11
+  Serial.println("\nESP32 Sensor Starting...");
+
   dht.begin();
 
   setupWiFi();
 }
 
+// ---------------- LOOP ----------------
 void loop() {
+
   if (!ensureWiFiConnected()) {
     return;
   }
@@ -158,7 +203,7 @@ void loop() {
   float temperature = dht.readTemperature();
 
   if (isnan(humidity) || isnan(temperature)) {
-    Serial.println("Failed to read from DHT11 sensor.");
+    Serial.println("Failed to read DHT11");
     return;
   }
 
